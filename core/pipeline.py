@@ -6,6 +6,7 @@ import time
 
 import cv2
 
+from core.metrics import estimate_lighting_ok
 from core.ocr_models import run_fullframe_ocr
 
 
@@ -41,5 +42,5 @@ def run_full_pipeline(image_path: str) -> dict:
         "roi_a": fields.get("roi_a", {"label": "UPC", "text": "", "conf": 0.0}),
         "roi_b": fields.get("roi_b", {"label": "S/N", "text": "", "conf": 0.0}),
         "roi_c": fields.get("roi_c", {"label": "BATCH", "text": "", "conf": 0.0}),
-        "lighting_ok": True,
+        "lighting_ok": bool(estimate_lighting_ok(image)),
     }
