@@ -14,6 +14,8 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -38,11 +40,33 @@ def main() -> int:
         return 2
 
     try:
+        worker_url = os.getenv("OCR_WORKER_URL", "").strip()
+        if worker_url:
+            endpoint = worker_url.rstrip("/") + "/ocr"
+            req_body = json.dumps({"image_path": image_path}).encode("utf-8")
+            req = urllib.request.Request(
+                endpoint,
+                data=req_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = resp.read().decode("utf-8")
+                print(raw)
+                return 0
+
         from core.pipeline import run_full_pipeline
 
         result = run_full_pipeline(image_path)
         print(json.dumps(result))
         return 0
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        print(json.dumps({"error": "Pipeline failed.", "detail": detail}))
+        return 1
+    except urllib.error.URLError as exc:
+        print(json.dumps({"error": "Pipeline failed.", "detail": str(exc)}))
+        return 1
     except Exception as exc:  # pylint: disable=broad-except
         print(
             json.dumps(

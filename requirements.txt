@@ -1,3 +1,7 @@
 numpy
 opencv-python
 easyocr
+rapidocr-onnxruntime
+onnxruntime
+fastapi
+uvicorn

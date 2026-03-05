@@ -1,90 +1,103 @@
-# Jetson OCR Backend Engine (Python)
+# Jetson OCR Backend (Persistent Worker + ONNX)
 
-Backend OCR engine intended to be called by a C# GUI application on Windows.
-The C# app passes an image path to `ocr_engine.py`, and Python returns one JSON
-object to stdout containing OCR text, confidence, timing, and lighting status.
+This project provides a backend OCR service for a Windows C# GUI.
 
-Default extraction strategy is **full-frame OCR** (EasyOCR) + text pattern
-classification:
-- `roi_a` <= Serial Number (S/N)
-- `roi_b` <= UPC/top-line numeric code
-- `roi_c` <= Part Number / Batch
+## What Changed
 
-Fixed-ROI flow is still available as legacy mode.
+- OCR engine is now optimized for realtime with **RapidOCR (ONNX Runtime)**.
+- Search space is reduced to a fixed **text band** (instead of full-frame multi-pass).
+- Added a **persistent Python worker API** to avoid spawning a new process for each image.
+- `easyocr` is still available as a fallback backend.
 
-## High-Level Architecture
+## Output Schema
 
-C# GUI -> Python CLI (`ocr_engine.py`) -> Core pipeline modules (`core/`) -> JSON stdout
-
-## Project Layout
-
-- `ocr_engine.py`: main entry point called by C#.
-- `config/roi_config.json`: fixed ROI definitions for legacy ROI mode.
-- `core/`: OCR pipeline modules (ROI, preprocessing, OCR abstraction, metrics).
-- `samples/raw/`: raw camera captures for local testing.
-- `samples/debug/`: intermediate artifacts (ROI crops, thresholded outputs).
-- `notebooks/experiments.ipynb`: manual experimentation for tuning.
-
-## Setup
-
-### 1) Create a virtual environment
-
-```bash
-python -m venv .venv
-```
-
-### 2) Activate it
-
-macOS/Linux:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-### 3) Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-## Pipeline Modes
-
-- Default: `fullframe` (no manual ROI tuning required)
-- Legacy: `legacy_roi` (uses `config/roi_config.json`)
-
-To run legacy mode:
-
-```bash
-OCR_PIPELINE_MODE=legacy_roi python ocr_engine.py samples/raw/example.jpg
-```
-
-## Run a Test
-
-```bash
-python ocr_engine.py samples/raw/example.jpg
-```
-
-## Expected JSON Output Shape
+The API and CLI return this schema:
 
 ```json
 {
   "time_ms": 42,
-  "roi_a": {"label": "S/N", "text": "89921-X", "conf": 0.998},
-  "roi_b": {"label": "MODEL", "text": "J-NANO", "conf": 0.985},
-  "roi_c": {"label": "BATCH", "text": "22A", "conf": 0.87},
+  "roi_a": {"label": "UPC", "text": "UPC", "conf": 0.99},
+  "roi_b": {"label": "S/N", "text": "1425022007009", "conf": 0.99},
+  "roi_c": {"label": "BATCH", "text": "945-13450-0000-100", "conf": 0.99},
   "lighting_ok": true
 }
 ```
 
-On error, the CLI prints JSON with an `error` field and exits non-zero.
+## Setup
 
-## ROI Calibration Note
+```bash
+python -m venv .venv
+source .venv/bin/activate      # Windows: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-The values in `config/roi_config.json` are placeholders. You must calibrate `x`,
-`y`, `w`, and `h` to your real Basler camera framing and label placement.
+## Start Persistent Worker (Recommended)
+
+```bash
+python run_worker.py
+```
+
+Default worker address:
+
+- `http://127.0.0.1:8088`
+
+Endpoints:
+
+- `GET /health`
+- `POST /ocr` with JSON body:
+
+```json
+{"image_path": "CV/test.bmp"}
+```
+
+## CLI Usage (Still Supported)
+
+```bash
+python ocr_engine.py CV/test.bmp
+```
+
+Optional: let CLI call a running worker instead of local inference:
+
+```bash
+OCR_WORKER_URL=http://127.0.0.1:8088 python ocr_engine.py CV/test.bmp
+```
+
+## Performance/Accuracy Modes
+
+`OCR_SPEED_MODE`:
+
+- `realtime`: fastest
+- `balanced` (default): fast path first, fallback when quality is low
+- `accurate`: most robust, slowest
+
+Example:
+
+```bash
+OCR_SPEED_MODE=realtime python ocr_engine.py CV/test.bmp
+```
+
+## CUDA
+
+CUDA is auto-detected (ONNX Runtime provider / Torch availability).
+
+Override:
+
+```bash
+OCR_USE_CUDA=1 python run_worker.py   # force GPU
+OCR_USE_CUDA=0 python run_worker.py   # force CPU
+```
+
+## Fixed Text Band Tuning
+
+To adjust search band (relative ratios):
+
+- `OCR_BAND_X1` (default `0.20`)
+- `OCR_BAND_X2` (default `0.90`)
+- `OCR_BAND_Y1` (default `0.16`)
+- `OCR_BAND_Y2` (default `0.76`)
+
+Example:
+
+```bash
+OCR_BAND_X1=0.18 OCR_BAND_X2=0.92 OCR_BAND_Y1=0.14 OCR_BAND_Y2=0.78 python run_worker.py
+```
